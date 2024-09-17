@@ -1,55 +1,153 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Function to load data from a CSV file or create a new DataFrame if the file doesn't exist
-def load_data():
-    if os.path.exists("attendance_log.csv"):
-        return pd.read_csv("attendance_log.csv")
-    else:
-        return pd.DataFrame(columns=["Employee ID", "Name", "Action", "Timestamp"])
+# Load existing employee data or create a new DataFrame
+try:
+    df = pd.read_csv('employees.csv')
+except FileNotFoundError:
+    df = pd.DataFrame(columns=['Employee ID', 'Name', 'Status', 'Timestamp'])
 
-# Function to save data to a CSV file
-def save_data(data):
-    data.to_csv("attendance_log.csv", index=False)
+# Form for employee check-in/check-out
+with st.form(key='employee_form'):
+    employee_id = st.text_input('Employee ID')
+    employee_name = st.text_input('Employee Name')
+    status = st.selectbox('Status', ['In', 'Out'])
+    submit_button = st.form_submit_button(label='Submit')
 
-# Streamlit application
-def main():
-    st.title("Employee In & Out Marking System")
+    if submit_button:
+        if employee_id and employee_name:
+            new_entry = pd.DataFrame({
+                'Employee ID': [employee_id],
+                'Name': [employee_name],
+                'Status': [status],
+                'Timestamp': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+            })
+            df = pd.concat([df, new_entry], ignore_index=True)
+            df.to_csv('employees.csv', index=False)
+            st.success('Data recorded successfully!')
+        else:
+            st.error('Please enter both Employee ID and Name.')
 
-    # Load the data
-    data = load_data()
+# Function to calculate hours
+def calculate_hours(df):
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+    in_df = df[df['Status'] == 'In']
+    out_df = df[df['Status'] == 'Out']
+    
+    merged_df = pd.merge(in_df, out_df, on='Employee ID', suffixes=('_In', '_Out'))
+    merged_df['Hours'] = (merged_df['Timestamp_Out'] - merged_df['Timestamp_In']).dt.total_seconds() / 3600
+    
+    return merged_df[['Employee ID', 'Name_In', 'Hours']]
 
-    # Input employee details
-    employee_id = st.text_input("Employee ID")
-    employee_name = st.text_input("Employee Name")
+# Sidebar for navigation
+st.sidebar.title('Dashboard Navigation')
+selection = st.sidebar.radio("Go to", ["Employee List", "Analytics", "Dashboard"])
 
-    # Mark In/Out buttons
-    if st.button("Mark In"):
-        mark_attendance(data, employee_id, employee_name, "In")
-    if st.button("Mark Out"):
-        mark_attendance(data, employee_id, employee_name, "Out")
+# Display employee data
+if selection == "Employee List":
+    st.subheader('Employee List')
+    st.write(df)
 
-    # Display attendance log
-    st.subheader("Attendance Log")
-    st.dataframe(data)
+# Analytics
+elif selection == "Analytics":
+    if not df.empty:
+        st.subheader('Analytics')
+        
+        # Total Check-Ins and Check-Outs
+        check_in_counts = df[df['Status'] == 'In'].groupby('Name').size()
+        check_out_counts = df[df['Status'] == 'Out'].groupby('Name').size()
+        
+        st.write(f"Total Check-Ins: {check_in_counts.sum()}")
+        st.write(f"Total Check-Outs: {check_out_counts.sum()}")
 
-    # Save data to CSV
-    save_data(data)
+        # Average Working Hours
+        hours_report = calculate_hours(df)
+        if not hours_report.empty:
+            avg_hours = hours_report['Hours'].mean()
+            st.write(f"Average Working Hours: {avg_hours:.2f} hours")
 
-    # Provide download link for the CSV file
-    st.subheader("Download Attendance Log")
-    st.download_button(label="Download CSV", data=data.to_csv(index=False), file_name="attendance_log.csv", mime="text/csv")
+        # Visualization: Check-In/Check-Out Counts
+        fig, ax = plt.subplots()
+        sns.barplot(x=check_in_counts.index, y=check_in_counts.values, ax=ax, color='green', label='Check-In')
+        sns.barplot(x=check_out_counts.index, y=check_out_counts.values, ax=ax, color='red', label='Check-Out')
 
-def mark_attendance(data, employee_id, employee_name, action):
-    """Function to mark attendance."""
-    if employee_id and employee_name:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        data.loc[len(data)] = [employee_id, employee_name, action, timestamp]
-        st.success(f"Marked {action} for {employee_name} at {timestamp}")
-    else:
-        st.error("Please enter both Employee ID and Name")
+        ax.set_xlabel('Employee Name')
+        ax.set_ylabel('Count')
+        ax.set_title('Check-In/Check-Out Counts')
+        ax.legend()
 
-if __name__ == "__main__":
-    main()
+        st.pyplot(fig)
+
+        # Visualization: Average Working Hours by Employee
+        if not hours_report.empty:
+            fig2, ax2 = plt.subplots()
+            sns.barplot(x=hours_report['Name_In'], y=hours_report['Hours'], ax=ax2, color='blue')
+
+            ax2.set_xlabel('Employee Name')
+            ax2.set_ylabel('Hours')
+            ax2.set_title('Average Working Hours by Employee')
+
+            st.pyplot(fig2)
+
+# Dashboard
+elif selection == "Dashboard":
+    st.subheader('Dashboard')
+    
+    if not df.empty:
+        # Total Check-Ins and Check-Outs
+        check_in_counts = df[df['Status'] == 'In'].groupby('Name').size()
+        check_out_counts = df[df['Status'] == 'Out'].groupby('Name').size()
+        
+        # Average Working Hours
+        hours_report = calculate_hours(df)
+        if not hours_report.empty:
+            avg_hours = hours_report['Hours'].mean()
+            st.write(f"Average Working Hours: {avg_hours:.2f} hours")
+
+        # Create interactive plots
+        st.write("### Check-In/Check-Out Counts")
+        check_in_plot = st.selectbox("Select Check-In/Check-Out Visualization", ["Bar Chart", "Pie Chart"])
+        
+        if check_in_plot == "Bar Chart":
+            fig, ax = plt.subplots()
+            sns.barplot(x=check_in_counts.index, y=check_in_counts.values, ax=ax, color='green', label='Check-In')
+            sns.barplot(x=check_out_counts.index, y=check_out_counts.values, ax=ax, color='red', label='Check-Out')
+
+            ax.set_xlabel('Employee Name')
+            ax.set_ylabel('Count')
+            ax.set_title('Check-In/Check-Out Counts')
+            ax.legend()
+
+            st.pyplot(fig)
+        elif check_in_plot == "Pie Chart":
+            fig, ax = plt.subplots()
+            sizes = [check_in_counts.sum(), check_out_counts.sum()]
+            labels = ['Check-In', 'Check-Out']
+            ax.pie(sizes, labels=labels, autopct='%1.1f%%', colors=['green', 'red'])
+
+            ax.set_title('Check-In/Check-Out Distribution')
+
+            st.pyplot(fig)
+        
+        st.write("### Average Working Hours by Employee")
+        if not hours_report.empty:
+            fig2, ax2 = plt.subplots()
+            sns.barplot(x=hours_report['Name_In'], y=hours_report['Hours'], ax=ax2, color='blue')
+
+            ax2.set_xlabel('Employee Name')
+            ax2.set_ylabel('Hours')
+            ax2.set_title('Average Working Hours by Employee')
+
+            st.pyplot(fig2)
+
+# Download button for CSV
+csv = df.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="Download CSV",
+    data=csv,
+    file_name='employees_list.csv',
+    mime='text/csv'
+)
